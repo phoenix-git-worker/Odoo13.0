@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="kw_daleth_service_product_product_form" model="ir.ui.view">
+        <field name="name">product.product.form (daleth_service)</field>
+        <field name="model">product.product</field>
+        <field name="inherit_id" ref="product.product_normal_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='kw_is_shown_on_website']/../.." position="after">
+            <div>
+                <field name="kw_sovtes_checkbox"/>
+                <label for="kw_sovtes_checkbox"/>
+            </div>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
