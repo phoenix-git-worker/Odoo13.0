@@ -193,12 +193,19 @@ class ApiController(http.Controller):
         for key, value in files.items():
             name = key
             file = base64.b64encode(value.read())
-            request.env['kw.document'].sudo().create({
-                'model': 'request.request',
-                'res_id': new_request.id,
-                'company_id': request.env.user.company_id.id,
+            doc_id = request.env['kw.document'].sudo().create({
                 'type_id': 404,
-                'file': file,
+                'res_id': new_request.id,
+                'model': 'request.request',
+                'filename': name,
+                'company_id': request.env.user.company_id.id,
+            })
+            request.env['ir.attachment'].sudo().create({
                 'name': name,
+                'res_model': 'kw.document',
+                'res_id': doc_id,
+                'type': 'binary',
+                'res_field': 'file',
+                'datas': file,
             })
         return kw_api.data_response(new_request)
