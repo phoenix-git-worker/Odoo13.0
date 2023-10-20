@@ -11,5 +11,5 @@ class ProductProduct(models.Model):
 
     kw_sovtes_checkbox = fields.Boolean(
         string='Sovtes',
-        default=True
+        default=False
     )

@@ -1,10 +1,10 @@
-# pylint: disable=too-many-locals, ungrouped-imports
+# pylint: disable=too-many-locals, ungrouped-imports, too-many-statements
 import base64
 import logging
 import werkzeug
 from odoo import http
-from odoo.tools.safe_eval import safe_eval
-from odoo.addons.kw_api.controllers.controller_base import kw_api_wrapper
+from odoo.addons.kw_api.controllers.controller_base import kw_api_wrapper, \
+    KwApiError
 from odoo.addons.kw_mixin.models.datetime_extract import mining_date
 
 from odoo.http import request
@@ -13,6 +13,16 @@ _logger = logging.getLogger(__name__)
 
 
 class ApiController(http.Controller):
+
+    @staticmethod
+    def get_multi_object_attributes(obj_sequence):
+        response = []
+        for obj in obj_sequence:
+            attrs = [attr for attr in dir(obj)
+                     if not callable(getattr(obj, attr))
+                     and not attr.startswith("_")]
+            response.append({a: getattr(obj, a) for a in attrs})
+        return response
 
     @http.route(
         route='/api/fleet_vehicle_models/',
@@ -26,7 +36,8 @@ class ApiController(http.Controller):
         models = request.env['fleet.vehicle.model'].sudo().search(
             []
         )
-        return kw_api.data_response(models)
+        response = self.get_multi_object_attributes(models)
+        return kw_api.data_response(response)
 
     @http.route(
         route='/api/daleth_customs_departments/',
@@ -40,7 +51,8 @@ class ApiController(http.Controller):
         departments = request.env['daleth.customs.department'].sudo().search(
             []
         )
-        return kw_api.data_response(departments)
+        response = self.get_multi_object_attributes(departments)
+        return kw_api.data_response(response)
 
     @http.route(
         route='/api/daleth_places/checkpoint/',
@@ -68,12 +80,8 @@ class ApiController(http.Controller):
         stages = request.env['request.stage'].sudo().search(
             []
         )
-        stages = [{
-            'id': item.id,
-            'name': item.name,
-            'code': item.code
-        } for item in stages]
-        return kw_api.data_response(stages)
+        response = self.get_multi_object_attributes(stages)
+        return kw_api.data_response(response)
 
     @http.route(
         route='/api/requests/',
@@ -108,6 +116,14 @@ class ApiController(http.Controller):
     )
     @kw_api_wrapper(token=False, paginate=True, get_json=False)
     def api_requests_post(self, kw_api, **kw):
+        if not all((
+            kw.get('partner_vat'),
+            kw.get('partner_name')
+        )):
+            raise KwApiError(
+                'missing fields',
+                '[ERR]partner_vat, partner_name are required'
+            )
         partner_info = {
             'vat': kw.get('partner_vat'),
             'name': kw.get('partner_name'),
@@ -120,12 +136,24 @@ class ApiController(http.Controller):
             ('name', '=', partner_info.get('name')),
         ])
         if not partner:
+            if not all((
+                kw.get('street'),
+                kw.get('phone'),
+                kw.get('mobile'),
+            )):
+                raise KwApiError(
+                    'missing fields',
+                    '[ERR]street, phone, mobile are required for new partner'
+                )
             sovtes_type = request.env['daleth.partner.type'].sudo(
-            ).search([('name', '=', 'Sovtes')], limit=1)
+            ).search([('is_sovtes', '=', True)], limit=1)
+            if not sovtes_type:
+                sovtes_type = request.env['daleth.partner.type'].sudo(
+                ).create({'name': 'Sovtes', 'is_sovtes': True})
             partner_info['kw_partner_type_ids'] = [
                 (6, None, [sovtes_type.id])
             ]
-            partner_info['company_type'] = 'company'
+            partner_info['is_company'] = True
             partner_info['requisites_ids'] = [
                 (0, 0, {'enterprise_code': kw.get(
                     'enterprise_code')})
@@ -137,15 +165,34 @@ class ApiController(http.Controller):
         service = request.env['request.request.line'].sudo().search([
             ('id', '=', service_id)
         ])
+        service.product_id.kw_sovtes_checkbox = True
+        if not service:
+            raise KwApiError(
+                'wrong field',
+                '[ERR]no service found with given id'
+            )
         vehicle = request.env['daleth.vehicle'].sudo().search([
             ('license_plate', '=', kw.get('vehicle_plate')),
         ]) or request.env['daleth.vehicle'].sudo().search([
             ('license_trailer', '=', kw.get('vehicle_trailer')),
         ])
-        driver_id = kw_api.get_param_by_name(kw, 'driver_id', int)
+        if not vehicle:
+            raise KwApiError(
+                'wrong field',
+                '[ERR]no vehicle found with given parameters'
+            )
         driver = request.env['res.partner'].sudo().search([
-            ('id', '=', driver_id),
+            ('kw_is_driver', '=', True),
+            ('name', '=', kw.get('driver_name')),
+            '|',
+            ('phone', '=', kw.get('driver_phone')),
+            ('mobile', '=', kw.get('driver.mobile')),
         ])
+        if not driver:
+            raise KwApiError(
+                'wrong field',
+                '[ERR]no driver found with given parameters'
+            )
         update_req = {'partner_id': partner.id}
         update_req['vehicle_id'] = vehicle.id
         update_req['transport_id'] = kw_api.get_param_by_name(
@@ -156,7 +203,12 @@ class ApiController(http.Controller):
         update_req['line_ids'] = [
             (4, service.id, None)
         ]
-        checkpoints = safe_eval(kw.get('checkpoints'))
+        if not kw.get('checkpoints'):
+            raise KwApiError(
+                'wrong field',
+                '[ERR]checkpoints ids are required in format: 1,2,3...'
+            )
+        checkpoints = [int(i) for i in kw.get('checkpoints').split(',')]
         update_req['kw_place_ids'] = [
             (6, None, checkpoints)
         ]
@@ -190,6 +242,11 @@ class ApiController(http.Controller):
         })
         files = {k: v for k, v in kw.items() if isinstance(
             v, werkzeug.datastructures.FileStorage)}
+        if not files:
+            raise KwApiError(
+                'empty files',
+                '[ERR]no files attached to request'
+            )
         for key, value in files.items():
             name = key
             file = base64.b64encode(value.read())

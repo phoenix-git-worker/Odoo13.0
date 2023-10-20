@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="kw_daleth_partner_type_form_inherit" model="ir.ui.view">
+        <field name="name">kw.daleth.partner.type.tree.inherit</field>
+        <field name="model">daleth.partner.type</field>
+        <field name="inherit_id" ref="daleth_partner.daleth_partner_daleth_partner_type_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='is_cargo_receiver']" position="after">
+                <field name="is_sovtes"/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
